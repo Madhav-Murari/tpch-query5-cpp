@@ -8,217 +8,223 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
-// ======================= PARSE ARGS =======================
+#include <unordered_set>
+#include <string>
+#include <iomanip>
+#include <chrono>
+
+using namespace std;
+
+struct Region   { int r_regionkey; string r_name; };
+struct Nation   { int n_nationkey; string n_name; int n_regionkey; };
+struct Supplier { int s_suppkey;   int s_nationkey; };
+struct Customer { int c_custkey;   int c_nationkey; };
+struct Order    { int o_orderkey;  int o_custkey;   string o_orderdate; };
+struct LineItem { int l_orderkey;  int l_suppkey;
+                  double l_extendedprice; double l_discount; };
+
+static vector<Region>   g_regions;
+static vector<Nation>   g_nations;
+static vector<Supplier> g_suppliers;
+static vector<Customer> g_customers;
+static vector<Order>    g_orders;
+static vector<LineItem> g_lineitems;
+
+static void splitPipe(const string& line, vector<string>& out) {
+    out.clear();
+    size_t start = 0, pos;
+    while ((pos = line.find('|', start)) != string::npos) {
+        out.emplace_back(line, start, pos - start);
+        start = pos + 1;
+    }
+    if (start < line.size()) out.emplace_back(line, start);
+}
+
 bool parseArgs(int argc, char* argv[],
-    std::string& r_name,
-    std::string& start_date,
-    std::string& end_date,
-    int& num_threads,
-    std::string& table_path,
-    std::string& result_path) {
-
+               string& r_name, string& start_date, string& end_date,
+               int& num_threads, string& table_path, string& result_path) {
     for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
-
-        if (arg == "--r_name" && i + 1 < argc)
-            r_name = argv[++i];
-
-        else if (arg == "--start_date" && i + 1 < argc)
-            start_date = argv[++i];
-
-        else if (arg == "--end_date" && i + 1 < argc)
-            end_date = argv[++i];
-
-        else if (arg == "--threads" && i + 1 < argc)
-            num_threads = std::stoi(argv[++i]);
-
-        else if (arg == "--table_path" && i + 1 < argc)
-            table_path = argv[++i];
-
-        else if (arg == "--result_path" && i + 1 < argc)
-            result_path = argv[++i];
+        string arg = argv[i];
+        if      (arg == "--r_name"      && i+1 < argc) r_name      = argv[++i];
+        else if (arg == "--start_date"  && i+1 < argc) start_date  = argv[++i];
+        else if (arg == "--end_date"    && i+1 < argc) end_date    = argv[++i];
+        else if (arg == "--threads"     && i+1 < argc) num_threads = stoi(argv[++i]);
+        else if (arg == "--table_path"  && i+1 < argc) table_path  = argv[++i];
+        else if (arg == "--result_path" && i+1 < argc) result_path = argv[++i];
     }
-
-    return !r_name.empty() &&
-           !start_date.empty() &&
-           !end_date.empty() &&
-           num_threads > 0 &&
-           !table_path.empty() &&
-           !result_path.empty();
+    return !r_name.empty() && !start_date.empty() && !end_date.empty()
+           && num_threads > 0 && !table_path.empty() && !result_path.empty();
 }
 
-// ======================= READ TABLE =======================
-std::vector<std::map<std::string, std::string>> readTable(const std::string& file) {
-    std::vector<std::map<std::string, std::string>> data;
-    std::ifstream fin(file);
+bool readTPCHData(const string& table_path,
+                  vector<map<string,string>>&,
+                  vector<map<string,string>>&,
+                  vector<map<string,string>>&,
+                  vector<map<string,string>>&,
+                  vector<map<string,string>>&,
+                  vector<map<string,string>>&) {
 
-    if (!fin.is_open()) {
-        std::cerr << "Error opening file: " << file << std::endl;
-        return data;
+    auto t0 = chrono::high_resolution_clock::now();
+    vector<string> c;
+
+    { ifstream f(table_path + "/region.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 2) g_regions.push_back({stoi(c[0]), c[1]}); } }
+
+    { ifstream f(table_path + "/nation.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 3) g_nations.push_back({stoi(c[0]), c[1], stoi(c[2])}); } }
+
+    { ifstream f(table_path + "/supplier.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 4) g_suppliers.push_back({stoi(c[0]), stoi(c[3])}); } }
+
+    { ifstream f(table_path + "/customer.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 4) g_customers.push_back({stoi(c[0]), stoi(c[3])}); } }
+
+    { ifstream f(table_path + "/orders.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 5) g_orders.push_back({stoi(c[0]), stoi(c[1]), c[4]}); } }
+
+    g_lineitems.reserve(12000000);
+    { ifstream f(table_path + "/lineitem.tbl"); string line;
+      while (getline(f, line)) { if (line.empty()) continue; splitPipe(line, c);
+        if (c.size() >= 7) g_lineitems.push_back({stoi(c[0]), stoi(c[2]),
+                                                   stod(c[5]), stod(c[6])}); } }
+
+    double ms = chrono::duration<double,milli>(
+                    chrono::high_resolution_clock::now()-t0).count();
+    cout << "Loaded: "
+         << g_regions.size() << " regions, " << g_nations.size() << " nations, "
+         << g_suppliers.size() << " suppliers, " << g_customers.size() << " customers, "
+         << g_orders.size() << " orders, " << g_lineitems.size() << " lineitems\n"
+         << fixed << setprecision(0) << "Load time: " << ms << " ms\n";
+
+    if (g_regions.empty() || g_nations.empty() || g_suppliers.empty() ||
+        g_customers.empty() || g_orders.empty() || g_lineitems.empty()) {
+        cerr << "One or more tables failed to load.\n"; return false;
     }
-
-    std::string line;
-    while (getline(fin, line)) {
-        std::stringstream ss(line);
-        std::string token;
-        std::map<std::string, std::string> row;
-
-        std::vector<std::string> cols;
-        while (getline(ss, token, '|')) {
-            cols.push_back(token);
-        }
-
-        for (int i = 0; i < cols.size(); i++) {
-            row[std::to_string(i)] = cols[i];
-        }
-
-        data.push_back(row);
-    }
-
-    return data;
-}
-
-
-// ======================= READ ALL DATA =======================
-// ======================= READ ALL DATA =======================
-bool readTPCHData(const std::string& table_path,
-                  std::vector<std::map<std::string, std::string>>& customer_data,
-                  std::vector<std::map<std::string, std::string>>& orders_data,
-                  std::vector<std::map<std::string, std::string>>& lineitem_data,
-                  std::vector<std::map<std::string, std::string>>& supplier_data,
-                  std::vector<std::map<std::string, std::string>>& nation_data,
-                  std::vector<std::map<std::string, std::string>>& region_data) {
-
-    // Read all tables directly from table_path
-    customer_data = readTable(table_path + "/customer.tbl");
-    if (customer_data.empty()) { std::cerr << "Failed to read customer.tbl\n"; return false; }
-
-    orders_data = readTable(table_path + "/orders.tbl");
-    if (orders_data.empty()) { std::cerr << "Failed to read orders.tbl\n"; return false; }
-
-    lineitem_data = readTable(table_path + "/lineitem.tbl");
-    if (lineitem_data.empty()) { std::cerr << "Failed to read lineitem.tbl\n"; return false; }
-
-    supplier_data = readTable(table_path + "/supplier.tbl");
-    if (supplier_data.empty()) { std::cerr << "Failed to read supplier.tbl\n"; return false; }
-
-    nation_data = readTable(table_path + "/nation.tbl");
-    if (nation_data.empty()) { std::cerr << "Failed to read nation.tbl\n"; return false; }
-
-    region_data = readTable(table_path + "/region.tbl");
-    if (region_data.empty()) { std::cerr << "Failed to read region.tbl\n"; return false; }
-
-    std::cout << "All TPC-H tables loaded successfully from " << table_path << std::endl;
-
     return true;
 }
 
-// ======================= QUERY 5 =======================
 bool executeQuery5(
-    const std::string& r_name,
-    const std::string& start_date,
-    const std::string& end_date,
+    const string& r_name, const string& start_date, const string& end_date,
     int num_threads,
-    const std::vector<std::map<std::string, std::string>>& customer_data,
-    const std::vector<std::map<std::string, std::string>>& orders_data,
-    const std::vector<std::map<std::string, std::string>>& lineitem_data,
-    const std::vector<std::map<std::string, std::string>>& supplier_data,
-    const std::vector<std::map<std::string, std::string>>& nation_data,
-    const std::vector<std::map<std::string, std::string>>& region_data,
-    std::map<std::string, double>& results)
+    const vector<map<string,string>>&, const vector<map<string,string>>&,
+    const vector<map<string,string>>&, const vector<map<string,string>>&,
+    const vector<map<string,string>>&, const vector<map<string,string>>&,
+    map<string,double>& results)
 {
-    std::mutex mtx;
-
-    // =================== BUILD LOOKUP MAPS ===================
-    std::map<std::string, std::string> order_to_cust;
-    for (const auto& o : orders_data) {
-        std::string orderkey = o.at("0");
-        std::string date = o.at("4");
-        if (date >= start_date && date <= end_date)
-            order_to_cust[orderkey] = o.at("1");
-    }
-
-    std::map<std::string, std::string> cust_to_nation;
-    for (const auto& c : customer_data) {
-        cust_to_nation[c.at("0")] = c.at("3");
-    }
-
-    std::map<std::string, std::string> supp_to_nation;
-    for (const auto& s : supplier_data) {
-        supp_to_nation[s.at("0")] = s.at("3");
-    }
-
-    std::map<std::string, std::string> nation_to_region;
-    std::map<std::string, std::string> nation_to_name;
-    for (const auto& n : nation_data) {
-        nation_to_region[n.at("0")] = n.at("2");
-        nation_to_name[n.at("0")] = n.at("1");
-    }
-
-    std::map<std::string, std::string> region_names;
-    for (const auto& r : region_data) {
-        region_names[r.at("0")] = r.at("1");
-    }
-    // ==========================================================
-
-    auto worker = [&](int start, int end) {
-        std::map<std::string, double> local;
-
-        for (int i = start; i < end; ++i) {
-            const auto& l = lineitem_data[i];
-            std::string orderkey = l.at("0");
-            std::string suppkey = l.at("2");
-            double price = std::stod(l.at("5"));
-            double discount = std::stod(l.at("6"));
-
-            auto o_it = order_to_cust.find(orderkey);
-            if (o_it == order_to_cust.end()) continue;
-
-            std::string custkey = o_it->second;
-
-            std::string nationkey = cust_to_nation[custkey];
-
-            if (supp_to_nation[suppkey] != nationkey) continue;
-
-            std::string regionkey = nation_to_region[nationkey];
-            if (region_names[regionkey] != r_name) continue;
-
-            std::string nation = nation_to_name[nationkey];
-            double revenue = price * (1 - discount);
-            local[nation] += revenue;
+    // ================= FIND REGION =================
+    int target_rk = -1;
+    for (const auto& r : g_regions) {
+        if (r.r_name == r_name) {
+            target_rk = r.r_regionkey;
+            break;
         }
+    }
+    if (target_rk == -1) {
+        cerr << "Region not found\n";
+        return false;
+    }
 
-        std::lock_guard<std::mutex> lock(mtx);
-        for (auto& p : local) results[p.first] += p.second;
+    // ================= FIND MAX KEYS =================
+    int max_orderkey = 0, max_custkey = 0, max_suppkey = 0, max_nationkey = 0;
+
+    for (auto& o : g_orders) max_orderkey = max(max_orderkey, o.o_orderkey);
+    for (auto& c : g_customers) max_custkey = max(max_custkey, c.c_custkey);
+    for (auto& s : g_suppliers) max_suppkey = max(max_suppkey, s.s_suppkey);
+    for (auto& n : g_nations) max_nationkey = max(max_nationkey, n.n_nationkey);
+
+    // ================= CREATE FAST ARRAYS =================
+    vector<int> cust_nation(max_custkey + 1, -1);
+    vector<int> supp_nation(max_suppkey + 1, -1);
+    vector<int> order_nation(max_orderkey + 1, -1);
+    vector<string> nation_name(max_nationkey + 1);
+
+    // ================= FILTER NATIONS =================
+    unordered_set<int> valid_nations;
+    for (const auto& n : g_nations) {
+        if (n.n_regionkey == target_rk) {
+            valid_nations.insert(n.n_nationkey);
+            nation_name[n.n_nationkey] = n.n_name;
+        }
+    }
+
+    // ================= BUILD LOOKUPS =================
+    for (const auto& s : g_suppliers)
+        supp_nation[s.s_suppkey] = s.s_nationkey;
+
+    for (const auto& c : g_customers)
+        if (valid_nations.count(c.c_nationkey))
+            cust_nation[c.c_custkey] = c.c_nationkey;
+
+    for (const auto& o : g_orders) {
+        if (o.o_orderdate < start_date || o.o_orderdate >= end_date)
+            continue;
+
+        int nk = cust_nation[o.o_custkey];
+        if (nk != -1)
+            order_nation[o.o_orderkey] = nk;
+    }
+
+    // ================= MULTITHREAD PROCESS =================
+    size_t total = g_lineitems.size();
+    size_t chunk = (total + num_threads - 1) / num_threads;
+
+    vector<vector<double>> local_results(num_threads, vector<double>(max_nationkey + 1, 0.0));
+    vector<thread> threads;
+
+    auto worker = [&](int tid, size_t lo, size_t hi) {
+        auto& local = local_results[tid];
+
+        for (size_t i = lo; i < hi; ++i) {
+            const auto& li = g_lineitems[i];
+
+            int nk = order_nation[li.l_orderkey];
+            if (nk == -1) continue;
+
+            if (supp_nation[li.l_suppkey] != nk) continue;
+
+            local[nk] += li.l_extendedprice * (1.0 - li.l_discount);
+        }
     };
 
-    int chunk = (lineitem_data.size() + num_threads - 1) / num_threads;
-    std::vector<std::thread> threads;
+    for (int t = 0; t < num_threads; ++t) {
+        size_t lo = t * chunk;
+        size_t hi = min(lo + chunk, total);
 
-    for (int i = 0; i < num_threads; ++i) {
-        int start = i * chunk;
-        int end = std::min((int)lineitem_data.size(), start + chunk);
-        threads.emplace_back(worker, start, end);
+        threads.emplace_back(worker, t, lo, hi);
     }
 
-    for (auto& t : threads) t.join();
+    for (auto& th : threads) th.join();
+
+    // ================= MERGE RESULTS =================
+    for (int t = 0; t < num_threads; ++t) {
+        for (int i = 0; i <= max_nationkey; ++i) {
+            if (local_results[t][i] > 0)
+                results[nation_name[i]] += local_results[t][i];
+        }
+    }
 
     return true;
 }
-// ======================= OUTPUT =======================
-bool outputResults(const std::string& result_path, const std::map<std::string, double>& results) {
-    std::ofstream fout(result_path + "/output.txt");
+bool outputResults(const string& result_path, const map<string,double>& results) {
+    vector<pair<string,double>> vec(results.begin(), results.end());
+    sort(vec.begin(), vec.end(),
+         [](const auto& a, const auto& b){ return a.second > b.second; });
 
-    std::vector<std::pair<std::string, double>> vec(results.begin(), results.end());
+    ofstream fout(result_path + "/output.txt");
+    if (!fout) { cerr << "Cannot write output.txt\n"; return false; }
 
-    std::sort(vec.begin(), vec.end(), [](auto& a, auto& b) {
-        return b.second > a.second;
-    });
-
-    for (auto& r : vec) {
-        fout << r.first << " : " << r.second << std::endl;
-        std::cout << r.first << " : " << r.second << std::endl;
+    cout << "\n" << left << setw(30) << "n_name"
+         << right << setw(22) << "revenue" << "\n" << string(52,'-') << "\n";
+    for (const auto& r : vec) {
+        cout << left << setw(30) << r.first
+             << right << fixed << setprecision(4) << setw(22) << r.second << "\n";
+        fout << r.first << " : " << fixed << setprecision(4) << r.second << "\n";
     }
-
+    cout << "\nResults written to: " << result_path << "/output.txt\n";
     return true;
 }
