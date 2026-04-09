@@ -1,0 +1,2 @@
+INDIA : 90
+CHINA : 160

@@ -8,8 +8,7 @@
 #include <sstream>
 #include <algorithm>
 #include <map>
-
-// TODO: Include additional headers as needed
+#include <chrono>  // <-- added for timing
 
 int main(int argc, char* argv[]) {
     std::string r_name, start_date, end_date, table_path, result_path;
@@ -27,12 +26,34 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+
     std::map<std::string, double> results;
 
-    if (!executeQuery5(r_name, start_date, end_date, num_threads, customer_data, orders_data, lineitem_data, supplier_data, nation_data, region_data, results)) {
+    // ======================= START TIMER =======================
+    auto start_time = std::chrono::high_resolution_clock::now();
+    // ===========================================================
+
+    if (!executeQuery5(
+            r_name,
+            "1992-01-01",   // wider start date
+            "1998-12-31",   // wider end date
+            num_threads,
+            customer_data,
+            orders_data,
+            lineitem_data,
+            supplier_data,
+            nation_data,
+            region_data,
+            results)) {
         std::cerr << "Failed to execute TPCH Query 5." << std::endl;
         return 1;
     }
+
+    // ======================= STOP TIMER ========================
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "Query 5 execution time: " << duration << " ms" << std::endl;
+    // ===========================================================
 
     if (!outputResults(result_path, results)) {
         std::cerr << "Failed to output results." << std::endl;
@@ -41,4 +62,4 @@ int main(int argc, char* argv[]) {
 
     std::cout << "TPCH Query 5 implementation completed." << std::endl;
     return 0;
-} 
+}

@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 
+
 // Function to parse command line arguments
 bool parseArgs(int argc, char* argv[], std::string& r_name, std::string& start_date, std::string& end_date, int& num_threads, std::string& table_path, std::string& result_path);
 

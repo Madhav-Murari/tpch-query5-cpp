@@ -5,8 +5,10 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
-
-// Function to parse command line arguments
+#include <vector>
+#include <map>
+#include <unordered_map>
+// ======================= PARSE ARGS =======================
 bool parseArgs(int argc, char* argv[],
     std::string& r_name,
     std::string& start_date,
@@ -37,15 +39,6 @@ bool parseArgs(int argc, char* argv[],
             result_path = argv[++i];
     }
 
-    // DEBUG PRINT (important)
-    std::cout << "Parsed values:\n";
-    std::cout << "r_name: " << r_name << "\n";
-    std::cout << "start_date: " << start_date << "\n";
-    std::cout << "end_date: " << end_date << "\n";
-    std::cout << "threads: " << num_threads << "\n";
-    std::cout << "table_path: " << table_path << "\n";
-    std::cout << "result_path: " << result_path << "\n";
-
     return !r_name.empty() &&
            !start_date.empty() &&
            !end_date.empty() &&
@@ -54,11 +47,17 @@ bool parseArgs(int argc, char* argv[],
            !result_path.empty();
 }
 
+// ======================= READ TABLE =======================
 std::vector<std::map<std::string, std::string>> readTable(const std::string& file) {
     std::vector<std::map<std::string, std::string>> data;
     std::ifstream fin(file);
-    std::string line;
 
+    if (!fin.is_open()) {
+        std::cerr << "Error opening file: " << file << std::endl;
+        return data;
+    }
+
+    std::string line;
     while (getline(fin, line)) {
         std::stringstream ss(line);
         std::string token;
@@ -69,7 +68,6 @@ std::vector<std::map<std::string, std::string>> readTable(const std::string& fil
             cols.push_back(token);
         }
 
-        // store generic columns
         for (int i = 0; i < cols.size(); i++) {
             row[std::to_string(i)] = cols[i];
         }
@@ -79,28 +77,47 @@ std::vector<std::map<std::string, std::string>> readTable(const std::string& fil
 
     return data;
 }
-// Function to read TPCH data from the specified paths
-bool readTPCHData(const std::string& table_path,
-    std::vector<std::map<std::string, std::string>>& customer_data,
-    std::vector<std::map<std::string, std::string>>& orders_data,
-    std::vector<std::map<std::string, std::string>>& lineitem_data,
-    std::vector<std::map<std::string, std::string>>& supplier_data,
-    std::vector<std::map<std::string, std::string>>& nation_data,
-    std::vector<std::map<std::string, std::string>>& region_data) {
 
+
+// ======================= READ ALL DATA =======================
+// ======================= READ ALL DATA =======================
+bool readTPCHData(const std::string& table_path,
+                  std::vector<std::map<std::string, std::string>>& customer_data,
+                  std::vector<std::map<std::string, std::string>>& orders_data,
+                  std::vector<std::map<std::string, std::string>>& lineitem_data,
+                  std::vector<std::map<std::string, std::string>>& supplier_data,
+                  std::vector<std::map<std::string, std::string>>& nation_data,
+                  std::vector<std::map<std::string, std::string>>& region_data) {
+
+    // Read all tables directly from table_path
     customer_data = readTable(table_path + "/customer.tbl");
+    if (customer_data.empty()) { std::cerr << "Failed to read customer.tbl\n"; return false; }
+
     orders_data = readTable(table_path + "/orders.tbl");
+    if (orders_data.empty()) { std::cerr << "Failed to read orders.tbl\n"; return false; }
+
     lineitem_data = readTable(table_path + "/lineitem.tbl");
+    if (lineitem_data.empty()) { std::cerr << "Failed to read lineitem.tbl\n"; return false; }
+
     supplier_data = readTable(table_path + "/supplier.tbl");
+    if (supplier_data.empty()) { std::cerr << "Failed to read supplier.tbl\n"; return false; }
+
     nation_data = readTable(table_path + "/nation.tbl");
+    if (nation_data.empty()) { std::cerr << "Failed to read nation.tbl\n"; return false; }
+
     region_data = readTable(table_path + "/region.tbl");
+    if (region_data.empty()) { std::cerr << "Failed to read region.tbl\n"; return false; }
+
+    std::cout << "All TPC-H tables loaded successfully from " << table_path << std::endl;
 
     return true;
 }
 
-
-// Function to execute TPCH Query 5 using multithreading
-bool executeQuery5(const std::string& r_name, const std::string& start_date, const std::string& end_date,
+// ======================= QUERY 5 =======================
+bool executeQuery5(
+    const std::string& r_name,
+    const std::string& start_date,
+    const std::string& end_date,
     int num_threads,
     const std::vector<std::map<std::string, std::string>>& customer_data,
     const std::vector<std::map<std::string, std::string>>& orders_data,
@@ -108,69 +125,79 @@ bool executeQuery5(const std::string& r_name, const std::string& start_date, con
     const std::vector<std::map<std::string, std::string>>& supplier_data,
     const std::vector<std::map<std::string, std::string>>& nation_data,
     const std::vector<std::map<std::string, std::string>>& region_data,
-    std::map<std::string, double>& results) {
-
+    std::map<std::string, double>& results)
+{
     std::mutex mtx;
+
+    // =================== BUILD LOOKUP MAPS ===================
+    std::map<std::string, std::string> order_to_cust;
+    for (const auto& o : orders_data) {
+        std::string orderkey = o.at("0");
+        std::string date = o.at("4");
+        if (date >= start_date && date <= end_date)
+            order_to_cust[orderkey] = o.at("1");
+    }
+
+    std::map<std::string, std::string> cust_to_nation;
+    for (const auto& c : customer_data) {
+        cust_to_nation[c.at("0")] = c.at("3");
+    }
+
+    std::map<std::string, std::string> supp_to_nation;
+    for (const auto& s : supplier_data) {
+        supp_to_nation[s.at("0")] = s.at("3");
+    }
+
+    std::map<std::string, std::string> nation_to_region;
+    std::map<std::string, std::string> nation_to_name;
+    for (const auto& n : nation_data) {
+        nation_to_region[n.at("0")] = n.at("2");
+        nation_to_name[n.at("0")] = n.at("1");
+    }
+
+    std::map<std::string, std::string> region_names;
+    for (const auto& r : region_data) {
+        region_names[r.at("0")] = r.at("1");
+    }
+    // ==========================================================
 
     auto worker = [&](int start, int end) {
         std::map<std::string, double> local;
 
-        for (int i = start; i < end; i++) {
-            auto& l = lineitem_data[i];
-
+        for (int i = start; i < end; ++i) {
+            const auto& l = lineitem_data[i];
             std::string orderkey = l.at("0");
             std::string suppkey = l.at("2");
             double price = std::stod(l.at("5"));
             double discount = std::stod(l.at("6"));
 
-            for (auto& o : orders_data) {
-                if (o.at("0") != orderkey) continue;
+            auto o_it = order_to_cust.find(orderkey);
+            if (o_it == order_to_cust.end()) continue;
 
-                std::string date = o.at("4");
-                if (date < start_date || date >= end_date) continue;
+            std::string custkey = o_it->second;
 
-                std::string custkey = o.at("1");
+            std::string nationkey = cust_to_nation[custkey];
 
-                for (auto& c : customer_data) {
-                    if (c.at("0") != custkey) continue;
+            if (supp_to_nation[suppkey] != nationkey) continue;
 
-                    std::string nationkey = c.at("3");
+            std::string regionkey = nation_to_region[nationkey];
+            if (region_names[regionkey] != r_name) continue;
 
-                    for (auto& s : supplier_data) {
-                        if (s.at("0") != suppkey) continue;
-                        if (s.at("3") != nationkey) continue;
-
-                        for (auto& n : nation_data) {
-                            if (n.at("0") != nationkey) continue;
-
-                            std::string regionkey = n.at("2");
-
-                            for (auto& r : region_data) {
-                                if (r.at("0") == regionkey && r.at("1") == r_name) {
-
-                                    std::string nation = n.at("1");
-                                    double revenue = price * (1 - discount);
-                                    local[nation] += revenue;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            std::string nation = nation_to_name[nationkey];
+            double revenue = price * (1 - discount);
+            local[nation] += revenue;
         }
 
         std::lock_guard<std::mutex> lock(mtx);
-        for (auto& p : local) {
-            results[p.first] += p.second;
-        }
+        for (auto& p : local) results[p.first] += p.second;
     };
 
+    int chunk = (lineitem_data.size() + num_threads - 1) / num_threads;
     std::vector<std::thread> threads;
-    int chunk = lineitem_data.size() / num_threads;
 
-    for (int i = 0; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; ++i) {
         int start = i * chunk;
-        int end = (i == num_threads - 1) ? lineitem_data.size() : start + chunk;
+        int end = std::min((int)lineitem_data.size(), start + chunk);
         threads.emplace_back(worker, start, end);
     }
 
@@ -178,11 +205,17 @@ bool executeQuery5(const std::string& r_name, const std::string& start_date, con
 
     return true;
 }
-// Function to output results to the specified path
+// ======================= OUTPUT =======================
 bool outputResults(const std::string& result_path, const std::map<std::string, double>& results) {
     std::ofstream fout(result_path + "/output.txt");
 
-    for (auto& r : results) {
+    std::vector<std::pair<std::string, double>> vec(results.begin(), results.end());
+
+    std::sort(vec.begin(), vec.end(), [](auto& a, auto& b) {
+        return b.second > a.second;
+    });
+
+    for (auto& r : vec) {
         fout << r.first << " : " << r.second << std::endl;
         std::cout << r.first << " : " << r.second << std::endl;
     }
